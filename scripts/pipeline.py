@@ -32,20 +32,37 @@ OUTPUTS_DIR = BASE_DIR / "outputs"
 # 유틸 함수
 # ==============================
 def print_section(title: str):
-    """섹션 시작 표시"""
-    print("\n" + "=" * 60)
-    print(f"  {title}")
-    print("=" * 60)
-
+    print(f"\n{'='*60}\n  {title}\n{'='*60}")
 
 def print_success(msg: str):
-    """성공 메시지"""
-    print(f"\n✓ {msg}")
-
+    print(f"✓ {msg}")
 
 def print_error(msg: str):
-    """에러 메시지"""
-    print(f"\n✗ {msg}")
+    print(f"✗ {msg}")
+
+
+def format_time(seconds: float) -> str:
+    total_seconds = int(round(seconds))
+    minutes = total_seconds // 60
+    secs = total_seconds % 60
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def highlight_labels(event_type: str) -> Dict[str, str]:
+    motion_map = {
+        "emphatic_gesture": "Strong Gesture",
+        "emphasized_speech": "Normal Gesture",
+        "emphasized_speech_with_gesture": "Strong Gesture",
+    }
+    speech_map = {
+        "emphatic_gesture": "Normal",
+        "emphasized_speech": "Emphasized",
+        "emphasized_speech_with_gesture": "Emphasized",
+    }
+    return {
+        "motion": motion_map.get(event_type, event_type),
+        "speech": speech_map.get(event_type, "Normal")
+    }
 
 
 def check_dependencies():
@@ -292,12 +309,16 @@ def step3_merge_multimodal(
         
         print_success(f"Generated {len(highlights)} highlight segments")
         
-        # 결과 요약
-        print("\nTop 5 Highlights:")
-        for i, h in enumerate(highlights[:5], 1):
-            print(f"  {i}. [{h.start:.1f}s - {h.end:.1f}s] "
-                  f"(score: {h.highlight_score:.3f})")
-            print(f"     Text: {h.text[:50]}...")
+        # 사용자 친화적 요약 출력
+        print("\n🔥 Highlight Summary")
+        for i, h in enumerate(highlights, 1):
+            labels = highlight_labels(h.event_type)
+            print(f"\n🔥 Highlight #{i}")
+            print(f"⏱ {format_time(h.start)} ~ {format_time(h.end)}")
+            print(f"🗣 \"{h.text.strip()}\"")
+            print(f"\n📈 Highlight Score: {h.highlight_score:.3f}")
+            print(f"🤲 Motion: {labels['motion']}")
+            print(f"🎤 Speech: {labels['speech']}")
         
         if log is not None:
             log["step3_highlights"] = {

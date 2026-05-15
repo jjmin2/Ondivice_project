@@ -9,6 +9,7 @@ from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Any
 import subprocess
 import sys
+import os
 
 try:
     import whisper
@@ -47,44 +48,35 @@ class SpeechSegment:
 def extract_audio_from_video(video_file: Path, output_audio: Path) -> bool:
     """
     비디오에서 오디오 추출 (ffmpeg 사용)
-    
-    Args:
-        video_file: 입력 비디오 파일
-        output_audio: 출력 오디오 파일
-    
-    Returns:
-        성공 여부
     """
     video_file = Path(video_file)
     output_audio = Path(output_audio)
     output_audio.parent.mkdir(parents=True, exist_ok=True)
-    
+
     if not video_file.exists():
         print(f"✗ Video file not found: {video_file}")
         return False
-    
+
     try:
-        # FFmpeg 경로 지정 (설치된 경로)
-        ffmpeg_path = r"C:\temp\ffmpeg\ffmpeg-8.1.1-essentials_build\bin\ffmpeg.exe"
-        
-        # ffmpeg 커맨드: 비디오에서 오디오만 추출
+        # FFmpeg 경로 자동 탐색 (환경변수 또는 기본 경로)
+        ffmpeg_path = os.environ.get('FFMPEG_PATH') or 'ffmpeg'
+
         cmd = [
             ffmpeg_path,
             "-i", str(video_file),
-            "-q:a", "9",  # 오디오 품질 (낮을수록 좋음)
-            "-y",  # 기존 파일 덮어쓰기
+            "-q:a", "9",
+            "-y",
             str(output_audio)
         ]
-        
+
         print(f"[ffmpeg] Extracting audio from {video_file.name}...")
-        
-        # ffmpeg 실행
+
         result = subprocess.run(cmd, capture_output=True, text=True)
-        
+
         if result.returncode != 0:
             print(f"✗ ffmpeg error: {result.stderr}")
             return False
-        
+
         if output_audio.exists():
             size_mb = output_audio.stat().st_size / (1024 * 1024)
             print(f"✓ Audio extracted: {output_audio.name} ({size_mb:.2f} MB)")
@@ -92,11 +84,9 @@ def extract_audio_from_video(video_file: Path, output_audio: Path) -> bool:
         else:
             print(f"✗ Audio file not created")
             return False
-            
+
     except FileNotFoundError:
-        print("✗ FFmpeg not found. Please install FFmpeg:")
-        print("   1. Download from: https://ffmpeg.org/download.html")
-        print("   2. Or run: pip install ffmpeg-python")
+        print("✗ FFmpeg not found. Install FFmpeg or set FFMPEG_PATH environment variable")
         return False
     except Exception as e:
         print(f"✗ Error: {e}")

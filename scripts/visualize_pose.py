@@ -5,7 +5,7 @@ from pathlib import Path
 # 프로젝트 경로
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-JSON_PATH = BASE_DIR / "outputs" / "pose_data.json"
+JSON_PATH = BASE_DIR / "outputs" / "pose_data_20260515_165616.json"
 
 # JSON 불러오기
 with open(JSON_PATH, "r", encoding="utf-8") as f:

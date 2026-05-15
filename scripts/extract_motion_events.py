@@ -1,10 +1,19 @@
 import json
 import sys
 from pathlib import Path
+import glob
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-INPUT_JSON = BASE_DIR / "outputs" / "pose_data_20260510_172117.json"
+# 최신 pose_data 파일 자동 찾기
+pose_files = glob.glob(str(BASE_DIR / "outputs" / "pose_data_*.json"))
+if pose_files:
+    INPUT_JSON = Path(max(pose_files, key=lambda x: Path(x).stat().st_mtime))
+    print(f"Found {len(pose_files)} pose files, using latest: {INPUT_JSON.name}")
+else:
+    INPUT_JSON = BASE_DIR / "outputs" / "pose_data.json"
+    print(f"No pose_data_*.json files found, using default: {INPUT_JSON.name}")
+
 OUTPUT_JSON = BASE_DIR / "outputs" / "motion_events.json"
 
 # ===== 설정값 =====
@@ -66,12 +75,14 @@ def extract_motion_events(input_json: Path, output_json: Path) -> int:
     in_event = False
     event_start = None
     event_scores = []
+    event_tags = set()
     low_motion_count = 0
 
     for frame in pose_data:
 
         timestamp = frame["timestamp"]
         score = frame["movement_score"]
+        frame_tags = frame.get("gesture_tags", [])
 
         # 움직임 감지
         if score > THRESHOLD:
@@ -80,14 +91,19 @@ def extract_motion_events(input_json: Path, output_json: Path) -> int:
                 in_event = True
                 event_start = timestamp
                 event_scores = []
+                event_tags = set()
 
             event_scores.append(score)
             low_motion_count = 0
+            if frame_tags:
+                event_tags.update(frame_tags)
 
         # threshold 이하
         else:
 
             if in_event:
+                if frame_tags:
+                    event_tags.update(frame_tags)
 
                 low_motion_count += 1
 
@@ -110,14 +126,17 @@ def extract_motion_events(input_json: Path, output_json: Path) -> int:
                         and peak_score >= MIN_PEAK_SCORE
                     ):
 
-                        events.append({
+                        event_data = {
                             "start": round(event_start, 2),
                             "end": round(event_end, 2),
                             "duration": round(duration, 2),
                             "action": "high_motion",
                             "average_score": round(avg_score, 4),
                             "peak_score": round(peak_score, 4)
-                        })
+                        }
+                        if event_tags:
+                            event_data["gesture_tags"] = sorted(event_tags)
+                        events.append(event_data)
 
                     in_event = False
                     low_motion_count = 0
@@ -135,15 +154,17 @@ def extract_motion_events(input_json: Path, output_json: Path) -> int:
             duration >= MIN_DURATION
             and peak_score >= MIN_PEAK_SCORE
         ):
-
-            events.append({
+            event_data = {
                 "start": round(event_start, 2),
                 "end": round(event_end, 2),
                 "duration": round(duration, 2),
                 "action": "high_motion",
                 "average_score": round(avg_score, 4),
                 "peak_score": round(peak_score, 4)
-            })
+            }
+            if event_tags:
+                event_data["gesture_tags"] = sorted(event_tags)
+            events.append(event_data)
 
     print(f"  ✓ Extracted {len(events)} motion events")
 
