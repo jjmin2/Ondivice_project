@@ -1,0 +1,19 @@
+# OnDevice Multimodal Video Edit Point Extraction System
+# 온디바이스 멀티모달 영상 편집포인트 추출 시스템
+
+# Core Dependencies
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+
+# Audio Processing
+openai-whisper>=20231117
+
+# Optional: For better performance on Jetson
+# torch>=2.0.0  # CUDA-enabled version for Jetson
+
+# Development (optional)
+pytest>=7.0
+black>=23.0
+flake8>=6.0
