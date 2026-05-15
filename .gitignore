@@ -8,9 +8,15 @@ venv/
 # Output videos
 outputs/
 *.mp4
-
+*.json
+/audio_output/*.wav
+/highlight_output/*.mp4
+/highlight_output/*.txt
 # VSCode settings
 .vscode/
+
+# videos
+/videos/*.mp4
 
 # OS files
 .DS_Store

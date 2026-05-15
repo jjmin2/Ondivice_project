@@ -10,11 +10,15 @@ import sys
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Gesture threshold 설정
-WIDE_GESTURE_THRESHOLD = 0.35  # 좌우 손 거리 임계값
-POINTING_ANGLE_THRESHOLD = 150.0  # 팔이 거의 직선이면 pointing
-MOTION_THRESHOLD = 0.05  # gesture 감지를 위한 최소 움직임
+WIDE_GESTURE_THRESHOLD = 0.30  # 좌우 손 거리 임계값
+WIDE_GESTURE_RATIO = 1.1  # 어깨 너비 대비 손 거리 비율
+WIDE_GESTURE_RATIO_STATIC = 1.35  # 정적 상태에서도 wide-gesture로 인정할 거리 비율
+POINTING_ANGLE_THRESHOLD = 140.0  # 팔이 거의 직선이면 pointing
+POINTING_HORIZONTAL_RATIO = 0.5  # 수평/수직 비율로 pointing 여부 추가 필터링
+POINTING_MAX_ELEVATION = 0.20  # 어깨보다 너무 높으면 pointing 제외
+MOTION_THRESHOLD = 0.03  # gesture 감지를 위한 최소 움직임
 GESTURE_MIN_FRAMES = 3  # gesture로 인정할 최소 연속 프레임 수
-WRIST_VELOCITY_THRESHOLD = 0.01  # 손목 속도 임계값
+WRIST_VELOCITY_THRESHOLD = 0.005  # 손목 속도 임계값
 
 # 명령줄 인자 처리
 if len(sys.argv) > 1:
@@ -72,26 +76,18 @@ class GestureDetector:
         if not (left_raise or right_raise):
             return False
 
-        # 움직임 조건
-        if movement_score < MOTION_THRESHOLD:
-            return False
-
-        # 속도 조건 (손목이 위로 이동 중)
+        # 이전 프레임에서 손이 위로 이동했거나 이미 hand_raise 상태였으면 허용
+        wrist_moving_up = False
         if self.prev_landmarks:
-            left_vel = self.calculate_velocity(left_wrist, self.prev_landmarks.get("left_wrist")) if left_wrist else 0
-            right_vel = self.calculate_velocity(right_wrist, self.prev_landmarks.get("right_wrist")) if right_wrist else 0
-
-            # 손목이 위로 이동하는 속도가 임계값 이상
-            wrist_moving_up = False
             if left_wrist and self.prev_landmarks.get("left_wrist"):
-                if left_wrist["y"] < self.prev_landmarks["left_wrist"]["y"]:  # y 감소 = 위로 이동
+                if left_wrist["y"] < self.prev_landmarks["left_wrist"]["y"]:
                     wrist_moving_up = True
             if right_wrist and self.prev_landmarks.get("right_wrist"):
                 if right_wrist["y"] < self.prev_landmarks["right_wrist"]["y"]:
                     wrist_moving_up = True
 
-            if not wrist_moving_up:
-                return False
+        if movement_score < MOTION_THRESHOLD and not wrist_moving_up and not self.gesture_states["hand_raise"]["active"]:
+            return False
 
         return True
 
@@ -99,38 +95,44 @@ class GestureDetector:
         """팔을 벌리는 움직임 감지"""
         left_wrist = landmarks.get("left_wrist")
         right_wrist = landmarks.get("right_wrist")
+        left_shoulder = landmarks.get("left_shoulder")
+        right_shoulder = landmarks.get("right_shoulder")
 
-        if not (left_wrist and right_wrist):
+        if not (left_wrist and right_wrist and left_shoulder and right_shoulder):
             return False
 
-        # 기본 조건: 손 사이 거리가 임계값 이상
         hand_distance = abs(left_wrist["x"] - right_wrist["x"])
-        if hand_distance <= WIDE_GESTURE_THRESHOLD:
+        shoulder_distance = abs(left_shoulder["x"] - right_shoulder["x"])
+        if shoulder_distance == 0:
             return False
 
-        # 움직임 조건
+        normalized = hand_distance / shoulder_distance
+        if hand_distance < WIDE_GESTURE_THRESHOLD and normalized < WIDE_GESTURE_RATIO:
+            return False
+
+        if not (left_wrist["x"] < left_shoulder["x"] - 0.06 and right_wrist["x"] > right_shoulder["x"] + 0.06):
+            return False
+
+        if abs(left_wrist["y"] - left_shoulder["y"]) > 0.35 or abs(right_wrist["y"] - right_shoulder["y"]) > 0.35:
+            return False
+
+        if normalized >= WIDE_GESTURE_RATIO:
+            return True
+
         if movement_score < MOTION_THRESHOLD:
             return False
 
-        # 팔 벌리는 방향으로 이동 중인지 확인
         if self.prev_landmarks:
             prev_left = self.prev_landmarks.get("left_wrist")
             prev_right = self.prev_landmarks.get("right_wrist")
-
             if prev_left and prev_right:
                 prev_distance = abs(prev_left["x"] - prev_right["x"])
-                # 현재 거리가 이전보다 커지는 중
-                if hand_distance <= prev_distance:
-                    return False
+                expanding = hand_distance > prev_distance + 0.005
+                moving_out = left_wrist["x"] < prev_left["x"] or right_wrist["x"] > prev_right["x"]
+                if expanding and moving_out:
+                    return True
 
-                # 양 손이 바깥으로 이동 중
-                left_moving_out = left_wrist["x"] < prev_left["x"]  # 왼쪽 손 왼쪽으로
-                right_moving_out = right_wrist["x"] > prev_right["x"]  # 오른쪽 손 오른쪽으로
-
-                if not (left_moving_out or right_moving_out):
-                    return False
-
-        return True
+        return False
 
     def detect_pointing(self, landmarks: dict, movement_score: float) -> bool:
         """팔을 펴는 움직임 감지"""
@@ -141,58 +143,74 @@ class GestureDetector:
         right_elbow = landmarks.get("right_elbow")
         right_wrist = landmarks.get("right_wrist")
 
-        pointing_left = False
-        pointing_right = False
-
-        # 왼팔 pointing 체크
-        if left_shoulder and left_elbow and left_wrist:
-            angle = calculate_elbow_angle(left_shoulder, left_elbow, left_wrist)
-            if angle > POINTING_ANGLE_THRESHOLD:
-                pointing_left = True
-
-        # 오른팔 pointing 체크
-        if right_shoulder and right_elbow and right_wrist:
-            angle = calculate_elbow_angle(right_shoulder, right_elbow, right_wrist)
-            if angle > POINTING_ANGLE_THRESHOLD:
-                pointing_right = True
-
-        if not (pointing_left or pointing_right):
+        if not (left_shoulder and left_elbow and left_wrist and right_shoulder and right_elbow and right_wrist):
             return False
 
-        # 움직임 조건
-        if movement_score < MOTION_THRESHOLD:
-            return False
+        angle_left = calculate_elbow_angle(left_shoulder, left_elbow, left_wrist)
+        angle_right = calculate_elbow_angle(right_shoulder, right_elbow, right_wrist)
 
-        # 손목 속도 조건
-        wrist_velocity = 0
+        left_score = 0
+        right_score = 0
+        left_score += int(angle_left > POINTING_ANGLE_THRESHOLD)
+        right_score += int(angle_right > POINTING_ANGLE_THRESHOLD)
+
+        left_x_offset = abs(left_wrist["x"] - left_shoulder["x"])
+        right_x_offset = abs(right_wrist["x"] - right_shoulder["x"])
+        left_y_offset = abs(left_wrist["y"] - left_shoulder["y"])
+        right_y_offset = abs(right_wrist["y"] - right_shoulder["y"])
+
+        left_score += int(left_x_offset > 0.08)
+        right_score += int(right_x_offset > 0.08)
+        left_score += int(left_x_offset > left_y_offset * POINTING_HORIZONTAL_RATIO)
+        right_score += int(right_x_offset > right_y_offset * POINTING_HORIZONTAL_RATIO)
+        left_score += int(left_wrist["y"] >= left_shoulder["y"] - POINTING_MAX_ELEVATION)
+        right_score += int(right_wrist["y"] >= right_shoulder["y"] - POINTING_MAX_ELEVATION)
+
+        if movement_score > MOTION_THRESHOLD:
+            left_score += int(angle_left > POINTING_ANGLE_THRESHOLD)
+            right_score += int(angle_right > POINTING_ANGLE_THRESHOLD)
+
+        left_velocity = 0.0
+        right_velocity = 0.0
         if self.prev_landmarks:
-            if pointing_left and left_wrist and self.prev_landmarks.get("left_wrist"):
-                wrist_velocity = max(wrist_velocity, self.calculate_velocity(left_wrist, self.prev_landmarks["left_wrist"]))
-            if pointing_right and right_wrist and self.prev_landmarks.get("right_wrist"):
-                wrist_velocity = max(wrist_velocity, self.calculate_velocity(right_wrist, self.prev_landmarks["right_wrist"]))
+            prev_left = self.prev_landmarks.get("left_wrist")
+            prev_right = self.prev_landmarks.get("right_wrist")
+            if prev_left:
+                left_velocity = self.calculate_velocity(left_wrist, prev_left)
+            if prev_right:
+                right_velocity = self.calculate_velocity(right_wrist, prev_right)
 
-        if wrist_velocity < WRIST_VELOCITY_THRESHOLD:
+        left_score += int(left_velocity > WRIST_VELOCITY_THRESHOLD)
+        right_score += int(right_velocity > WRIST_VELOCITY_THRESHOLD)
+
+        if left_score >= 4 and right_score >= 4:
             return False
 
-        return True
+        return left_score >= 4 or right_score >= 4
 
     def detect_gesture(self, landmarks: dict, movement_score: float) -> list[str]:
         """통합 gesture detection with temporal consistency"""
         active_gestures = []
 
-        # 각 gesture 감지
-        gestures_to_check = {
-            "hand_raise": self.detect_hand_raise(landmarks, movement_score),
+        results = {
             "wide_gesture": self.detect_wide_gesture(landmarks, movement_score),
+            "hand_raise": self.detect_hand_raise(landmarks, movement_score),
             "pointing": self.detect_pointing(landmarks, movement_score)
         }
 
-        for gesture_name, detected in gestures_to_check.items():
-            state = self.gesture_states[gesture_name]
+        selected = []
+        if results["wide_gesture"]:
+            selected = ["wide_gesture"]
+        elif results["pointing"]:
+            selected = ["pointing"]
+        elif results["hand_raise"]:
+            selected = ["hand_raise"]
+
+        for gesture_name, state in self.gesture_states.items():
+            detected = gesture_name in selected
 
             if detected:
                 state["count"] += 1
-                # 최소 프레임 수 이상 연속 감지되면 active
                 if state["count"] >= GESTURE_MIN_FRAMES:
                     if not state["active"]:
                         state["active"] = True
@@ -206,7 +224,6 @@ class GestureDetector:
                 state["active"] = False
                 state["count"] = 0
 
-        # 이전 landmark 저장
         self.prev_landmarks = landmarks.copy()
 
         return active_gestures

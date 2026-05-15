@@ -11,6 +11,7 @@ Pipeline Flow:
 
 import sys
 import json
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -26,6 +27,7 @@ except ImportError as e:
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUTS_DIR = BASE_DIR / "outputs"
+HIGHLIGHT_REEL_FILE = OUTPUTS_DIR / "highlight_reel.mp4"
 
 
 # ==============================
@@ -66,7 +68,7 @@ def highlight_labels(event_type: str) -> Dict[str, str]:
 
 
 def check_dependencies():
-    """필요한 라이브러리 확인"""
+    """필요한 라이브러리 및 도구 확인"""
     print("Checking dependencies...")
     
     dependencies = {
@@ -84,9 +86,21 @@ def check_dependencies():
         except ImportError:
             print(f"  ✗ {module} (install: pip install {package})")
             missing.append(package)
+
+    # FFmpeg 확인 (비디오 하이라이트 생성에 필요)
+    try:
+        import shutil
+        if shutil.which("ffmpeg"):
+            print("  ✓ ffmpeg")
+        else:
+            print("  ✗ ffmpeg (install FFmpeg and ensure it is on PATH)")
+            missing.append("ffmpeg")
+    except Exception:
+        print("  ✗ ffmpeg (install FFmpeg and ensure it is on PATH)")
+        missing.append("ffmpeg")
     
     if missing:
-        print(f"\nMissing packages: {', '.join(missing)}")
+        print(f"\nMissing packages/tools: {', '.join(sorted(set(missing)))}")
         return False
     
     return True
@@ -278,7 +292,7 @@ def step2_transcribe_audio(
 def step3_merge_multimodal(
     model_name: str = "base",
     log: Dict[str, Any] = None
-) -> bool:
+) -> list:
     """
     Step 3: 멀티모달 병합 및 Highlight 추출
     
@@ -298,19 +312,19 @@ def step3_merge_multimodal(
         if not motion_events_file.exists():
             print_error(f"Motion events file not found: {motion_events_file}")
             print("Please run Step 1 first")
-            return False
+            return []
         
         # Merge 실행
         highlights = merge_main(model_name=model_name)
         
         if not highlights:
             print_error("No highlights generated")
-            return False
+            return []
         
         print_success(f"Generated {len(highlights)} highlight segments")
         
         # 사용자 친화적 요약 출력
-        print("\n🔥 Highlight Summary")
+        print("\n🔥 Highlight Summary\n")
         for i, h in enumerate(highlights, 1):
             labels = highlight_labels(h.event_type)
             print(f"\n🔥 Highlight #{i}")
@@ -336,14 +350,14 @@ def step3_merge_multimodal(
                 ]
             }
         
-        return True
+        return highlights
         
     except Exception as e:
         print_error(f"Highlight extraction failed: {e}")
         if log is not None:
             log["step3_highlights"]["status"] = "failed"
             log["step3_highlights"]["error"] = str(e)
-        return False
+        return []
 
 
 # ==============================
@@ -373,6 +387,12 @@ def run_full_pipeline(
     print("  OnDevice Multimodal Video Edit Point Extraction Pipeline")
     print("🎬" * 30)
     
+    # 입력 경로 정규화
+    if video_file:
+        video_file = Path(video_file)
+    if audio_file:
+        audio_file = Path(audio_file)
+
     # 로그 초기화
     log_data = {
         "timestamp": datetime.now().isoformat(),
@@ -414,9 +434,18 @@ def run_full_pipeline(
     
     # Step 3: Multimodal 병합 및 highlight 추출
     log_data["steps"]["step3_highlights"] = {"status": "pending"}
-    if not step3_merge_multimodal(whisper_model, log_data["steps"]):
+    highlights = step3_merge_multimodal(whisper_model, log_data["steps"])
+    if not highlights:
         print_error("Pipeline failed at Step 3")
         return False
+
+    # Step 4: Highlight video 추출
+    if video_file:
+        log_data["steps"]["step4_export_video"] = {"status": "pending"}
+        highlight_video_file = OUTPUTS_DIR / f"{video_file.stem}_highlight_reel.mp4"
+        if not step4_export_highlight_video(video_file, highlights, highlight_video_file, log_data["steps"]):
+            print_error("Pipeline failed at Step 4")
+            return False
     
     # 최종 결과
     print_section("Pipeline Complete ✓")
@@ -431,6 +460,10 @@ def run_full_pipeline(
         print(f"  - Import highlights into your video editor")
         print(f"  - Use for automatic chapter generation")
         print(f"  - Fast-track editing workflow")
+        if video_file:
+            highlight_video_file = OUTPUTS_DIR / f"{video_file.stem}_highlight_reel.mp4"
+            if highlight_video_file.exists():
+                print(f"  - Highlight reel: {highlight_video_file}")
     
     # 파이프라인 로그 저장
     log_file = OUTPUTS_DIR / f"pipeline_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -443,6 +476,103 @@ def run_full_pipeline(
 # ==============================
 # CLI
 # ==============================
+def step4_export_highlight_video(
+    video_file: Path,
+    highlights: list,
+    output_file: Path,
+    log: Dict[str, Any] = None
+) -> bool:
+    """
+    Step 4: Highlight video 파일 생성
+    """
+    print_section("Step 4: Export Highlight Video")
+
+    try:
+        video_file = Path(video_file)
+        if not video_file.exists():
+            print_error(f"Video file not found: {video_file}")
+            return False
+        if not highlights:
+            print_error("No highlight segments to export")
+            return False
+
+        tmp_dir = OUTPUTS_DIR / ".highlight_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        list_file = tmp_dir / "highlight_concat.txt"
+        clip_paths = []
+
+        for idx, seg in enumerate(highlights, start=1):
+            start = float(seg.start) if hasattr(seg, "start") else float(seg["start"])
+            end = float(seg.end) if hasattr(seg, "end") else float(seg["end"])
+            duration = max(end - start, 0.1)
+            clip_path = tmp_dir / f"highlight_part_{idx:02d}.mp4"
+
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-ss", f"{start:.3f}",
+                "-i", str(video_file),
+                "-t", f"{duration:.3f}",
+                "-c", "copy",
+                str(clip_path)
+            ]
+
+            print(f"Extracting clip {idx}: {start:.2f}s -> {end:.2f}s")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print_error(f"FFmpeg clip extraction failed: {result.stderr.strip()}")
+                return False
+
+            clip_paths.append(clip_path)
+
+        with open(list_file, "w", encoding="utf-8") as f:
+            for clip_path in clip_paths:
+                f.write(f"file '{clip_path.as_posix()}'\n")
+
+        concat_cmd = [
+            "ffmpeg",
+            "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", str(list_file),
+            "-c", "copy",
+            str(output_file)
+        ]
+
+        print(f"Building highlight reel: {output_file.name}")
+        result = subprocess.run(concat_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print_error(f"FFmpeg concat failed: {result.stderr.strip()}")
+            return False
+
+        if log is not None:
+            log["step4_export_video"] = {
+                "status": "success",
+                "output_file": str(output_file)
+            }
+
+        print_success(f"Highlight reel saved: {output_file.name}")
+        return True
+
+    except FileNotFoundError:
+        print_error("FFmpeg not found. Install FFmpeg and ensure it is on PATH.")
+        if log is not None:
+            log["step4_export_video"] = {
+                "status": "failed",
+                "error": "ffmpeg not found"
+            }
+        return False
+    except Exception as e:
+        print_error(f"Highlight video export failed: {e}")
+        if log is not None:
+            log["step4_export_video"] = {
+                "status": "failed",
+                "error": str(e)
+            }
+        return False
+
+
 def main():
     import argparse
     
