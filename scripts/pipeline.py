@@ -327,11 +327,17 @@ def step3_merge_multimodal(
         print("\n🔥 Highlight Summary\n")
         for i, h in enumerate(highlights, 1):
             labels = highlight_labels(h.event_type)
+            
+            # gesture tag 문자열 생성
+            gesture_text = ""
+            if h.gesture_tags:
+                gesture_text = f" ({', '.join(h.gesture_tags)})"
+            
             print(f"\n🔥 Highlight #{i}")
             print(f"⏱ {format_time(h.start)} ~ {format_time(h.end)}")
             print(f"🗣 \"{h.text.strip()}\"")
             print(f"\n📈 Highlight Score: {h.highlight_score:.3f}")
-            print(f"🤲 Motion: {labels['motion']}")
+            print(f"🤲 Motion: {labels['motion']}{gesture_text}")
             print(f"🎤 Speech: {labels['speech']}")
         
         if log is not None:

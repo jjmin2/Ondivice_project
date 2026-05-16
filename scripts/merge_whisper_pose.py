@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional
+from dataclasses import field
 
 try:
     import whisper
@@ -57,6 +58,7 @@ class MotionEvent:
     action: str = "high_motion"
     average_score: float = 0.0
     peak_score: float = 0.0
+    gesture_tags: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -70,7 +72,8 @@ class HighlightSegment:
     motion_score: float
     highlight_score: float
     event_type: str
-    note: str
+    gesture_tags: List[str] = field(default_factory=list)
+    note: str =""
 
 
 
@@ -96,6 +99,7 @@ def load_motion_events(path: Path) -> List[MotionEvent]:
                 action=item.get("action", "high_motion"),
                 average_score=float(item.get("average_score", 0.0)),
                 peak_score=float(item.get("peak_score", 0.0)),
+                gesture_tags=item.get("gesture_tags", [])
             )
         )
     return events
@@ -283,7 +287,8 @@ def build_highlights(
                         motion_score=round(m_score, 3),
                         highlight_score=round(highlight_score, 3),
                         event_type=event_type,
-                        note=" | ".join(note_parts) if note_parts else "highlight",
+                        gesture_tags=m.gesture_tags if hasattr(m, "gesture_tags") else [],
+                        note=" | ".join(note_parts) if note_parts else "highlight"
                     )
                 )
 
