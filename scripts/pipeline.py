@@ -155,7 +155,7 @@ def step0_extract_pose(video_file: Path, log: Dict[str, Any] = None) -> bool:
         # pose_analyzer.py 실행 (별도 프로세스로)
         import subprocess
         result = subprocess.run([
-            "python", "scripts/pose_analyzer.py", str(video_file)
+            "python3", "scripts/pose_analyzer.py", str(video_file)
         ], capture_output=True, text=True, cwd=BASE_DIR)
         
         if result.returncode != 0:
@@ -419,7 +419,7 @@ def run_full_pipeline(
         return False
     
     # Step 0: Pose 데이터 생성 (비디오에서)
-    if video_file:
+    if video_file and not skip_step1:
         log_data["steps"]["step0_pose_extraction"] = {"status": "pending"}
         if not step0_extract_pose(video_file, log_data["steps"]):
             print_error("Pipeline failed at Step 0")
