@@ -323,6 +323,8 @@ def step3_merge_multimodal(
         
         print_success(f"Generated {len(highlights)} highlight segments")
         
+        highlights.sort(key=lambda h: h.start)
+        
         # 사용자 친화적 요약 출력
         print("\n🔥 Highlight Summary\n")
         for i, h in enumerate(highlights, 1):
@@ -507,6 +509,11 @@ def step4_export_highlight_video(
 
         list_file = tmp_dir / "highlight_concat.txt"
         clip_paths = []
+
+        highlights = sorted(
+            highlights,
+            key=lambda h: h.start if hasattr(h, "start") else h["start"]
+        )
 
         for idx, seg in enumerate(highlights, start=1):
             start = float(seg.start) if hasattr(seg, "start") else float(seg["start"])
