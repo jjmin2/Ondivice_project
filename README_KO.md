@@ -234,12 +234,16 @@ KEYWORDS = [                 # 강조 감지 키워드
 ```json
 [
     {
-        "start": 5.0,
-        "end": 8.5,
-        "duration": 3.5,
+        "start": 0.3,
+        "end": 1.9,
+        "duration": 1.6,
         "action": "high_motion",
-        "average_score": 0.25,
-        "peak_score": 0.42
+        "average_score": 0.0554,
+        "peak_score": 0.2213,
+        "gesture_tags": [
+            "hand_raise",
+            "pointing"
+        ]
     }
 ]
 ```
@@ -248,9 +252,9 @@ KEYWORDS = [                 # 강조 감지 키워드
 ```json
 [
     {
-        "start": 4.5,
-        "end": 9.2,
-        "text": "이 부분이 매우 중요합니다.",
+        "start": 2.94,
+        "end": 6.2,
+        "text": "변화하는 비율 변화율.",
         "language": "ko"
     }
 ]
@@ -260,43 +264,23 @@ KEYWORDS = [                 # 강조 감지 키워드
 ```json
 [
     {
-        "start": 4.5,
-        "end": 9.2,
-        "duration": 4.7,
-        "text": "이 부분이 매우 중요합니다.",
-        "speech_score": 0.75,
-        "motion_score": 0.42,
-        "highlight_score": 0.768,
-        "event_type": "emphasized_speech_with_gesture",
-        "note": "speech(0.75) | motion(0.42) | overlap(1.50s)"
-    }
+        "start": 5.43,
+        "end": 15.9,
+        "duration": 10.47,
+        "text": "이 변화율이라는 게 뭐라고 뭐냐면 수상생수가 우리 조금 전에 12시에는 12시 우리 아까 한 3000명   정도 됐었거든요. 이 변화율이라는 게 뭐라고 뭐냐면 수상생수가 우리 조금 전에 12시에는 12시 우리 아까 한  3000명 정도 됐었거든요. 3000명.",
+        "speech_score": 0.4,
+        "motion_score": 1.0,
+        "highlight_score": 0.689,
+        "event_type": "emphasized_speech",
+        "gesture_tags": [
+            "hand_raise",
+            "pointing"
+        ],
+        "note": "overlap(4.70s) | motion(1.00) | overlap(2.63s) | motion(1.00)"
+  }
 ]
 ```
-
 ---
-
-## 🎬 활용 사례
-
-### 1. 자동 챕터 생성
-```python
-# highlight_segments.json을 기반으로 YouTube 챕터 자동 생성
-00:05 - 중요 발화 (점수: 0.768)
-00:15 - 강조 제스처 (점수: 0.640)
-00:32 - 종합 강조 (점수: 0.720)
-```
-
-### 2. 빠른 편집 워크플로우
-- 자동 감지된 포인트를 편집 구간으로 활용
-- 수동 편집 시간 50% 단축 가능
-- 1시간 영상 → 5분 이내 핵심 구간 추출
-
-### 3. 콘텐츠 분류
-- 강조도(highlight_score) 기반 자동 분류
-- 자막 생성 시 중요 구간 강조
-- 썸네일 자동 생성 대상 선정
-
----
-
 ## 🔧 Jetson Orin Nano 최적화
 
 ### 메모리 고려사항
@@ -326,21 +310,6 @@ python scripts/validate.py
 ```
 
 ---
-
-## 📈 성능 지표
-
-### 테스트 결과 (샘플 데이터)
-
-| 항목 | 결과 |
-|------|------|
-| Motion Events 감지 | 3개 (총 10초) |
-| Speech Segments | 3개 (총 37.8초) |
-| Highlight Segments | 3개 (평균 점수: 0.67) |
-| 처리 시간 | <5초 (Jetson Orin Nano) |
-| 메모리 사용량 | ~500MB |
-
----
-
 ## 🐛 문제 해결
 
 ### 오디오 파일을 찾을 수 없음
@@ -402,5 +371,4 @@ This project is provided for research and development purposes.
 
 ---
 
-**최종 업데이트**: 2025-05-15
-**시스템 상태**: ✅ READY FOR PRODUCTION
+**최종 업데이트**: 2025-05-16

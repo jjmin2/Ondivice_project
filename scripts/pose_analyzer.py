@@ -14,8 +14,8 @@ WIDE_GESTURE_THRESHOLD = 0.30  # 좌우 손 거리 임계값
 WIDE_GESTURE_RATIO = 1.2  # 어깨 너비 대비 손 거리 비율
 WIDE_GESTURE_RATIO_STATIC = 1.7  # 정적 상태에서도 wide-gesture로 인정할 거리 비율
 POINTING_ANGLE_THRESHOLD = 140.0  # 팔이 거의 직선이면 pointing
-POINTING_HORIZONTAL_RATIO = 0.5  # 수평/수직 비율로 pointing 여부 추가 필터링
-POINTING_MAX_ELEVATION = 0.20  # 어깨보다 너무 높으면 pointing 제외
+POINTING_HORIZONTAL_RATIO = 0.3  # 수평/수직 비율로 pointing 여부 추가 필터링
+POINTING_MAX_ELEVATION = 0.35  # 어깨보다 너무 높으면 pointing 제외
 MOTION_THRESHOLD = 0.03  # gesture 감지를 위한 최소 움직임
 GESTURE_MIN_FRAMES = 3  # gesture로 인정할 최소 연속 프레임 수
 WRIST_VELOCITY_THRESHOLD = 0.005  # 손목 속도 임계값
@@ -49,9 +49,21 @@ class GestureDetector:
     def __init__(self):
         self.prev_landmarks = None
         self.gesture_states = {
-            "hand_raise": {"active": False, "count": 0},
-            "wide_gesture": {"active": False, "count": 0},
-            "pointing": {"active": False, "count": 0}
+            "hand_raise": {
+                "active": False,
+                "count": 0,
+                "miss": 0
+            },
+            "wide_gesture": {
+                "active": False,
+                "count": 0,
+                "miss": 0
+            },
+            "pointing": {
+                "active": False,
+                "count": 0,
+                "miss": 0
+            }
         }
 
     def calculate_velocity(self, current: dict, prev: dict) -> float:
@@ -119,8 +131,8 @@ class GestureDetector:
             
             # 손이 너무 아래에 있으면 wide gesture 제외
             if (
-                left_wrist["y"] > left_shoulder["y"] + 0.15 or
-                right_wrist["y"] > right_shoulder["y"] + 0.15
+                left_wrist["y"] > left_shoulder["y"] + 0.25 or
+                right_wrist["y"] > right_shoulder["y"] + 0.25
             ):
                 return False
             
@@ -251,6 +263,7 @@ class GestureDetector:
 
             if detected:
                 state["count"] += 1
+                state["miss"] = 0
                 if state["count"] >= GESTURE_MIN_FRAMES:
                     if not state["active"]:
                         state["active"] = True
@@ -259,14 +272,34 @@ class GestureDetector:
                     else:
                         active_gestures.append(gesture_name)
             else:
+                state["miss"] += 1
+
+                # 잠깐 놓쳐도 유지
+                if state["miss"] < 5:
+                    if state["active"]:
+                        active_gestures.append(gesture_name)
+                    continue
+
                 if state["active"]:
                     print(f"[Gesture END] {gesture_name} (duration: {state['count']} frames)")
+
                 state["active"] = False
                 state["count"] = 0
+                state["miss"] = 0
 
         self.prev_landmarks = landmarks.copy()
 
-        return active_gestures
+        priority = [
+            "wide_gesture",
+            "pointing",
+            "hand_raise"
+        ]
+
+        for gesture in priority:
+            if gesture in active_gestures:
+                return [gesture]
+
+        return []
 
 
 def calculate_elbow_angle(shoulder: dict, elbow: dict, wrist: dict) -> float:
