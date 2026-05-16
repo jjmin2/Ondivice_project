@@ -11,8 +11,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Gesture threshold 설정
 WIDE_GESTURE_THRESHOLD = 0.30  # 좌우 손 거리 임계값
-WIDE_GESTURE_RATIO = 1.1  # 어깨 너비 대비 손 거리 비율
-WIDE_GESTURE_RATIO_STATIC = 1.35  # 정적 상태에서도 wide-gesture로 인정할 거리 비율
+WIDE_GESTURE_RATIO = 1.2  # 어깨 너비 대비 손 거리 비율
+WIDE_GESTURE_RATIO_STATIC = 1.7  # 정적 상태에서도 wide-gesture로 인정할 거리 비율
 POINTING_ANGLE_THRESHOLD = 140.0  # 팔이 거의 직선이면 pointing
 POINTING_HORIZONTAL_RATIO = 0.5  # 수평/수직 비율로 pointing 여부 추가 필터링
 POINTING_MAX_ELEVATION = 0.20  # 어깨보다 너무 높으면 pointing 제외
@@ -107,19 +107,29 @@ class GestureDetector:
             return False
 
         normalized = hand_distance / shoulder_distance
-        if hand_distance < WIDE_GESTURE_THRESHOLD and normalized < WIDE_GESTURE_RATIO:
+        if normalized < WIDE_GESTURE_RATIO:
             return False
 
-        if not (left_wrist["x"] < left_shoulder["x"] - 0.06 and right_wrist["x"] > right_shoulder["x"] + 0.06):
-            return False
-
-        if abs(left_wrist["y"] - left_shoulder["y"]) > 0.35 or abs(right_wrist["y"] - right_shoulder["y"]) > 0.35:
-            return False
-
-        if normalized >= WIDE_GESTURE_RATIO:
+        if normalized >= WIDE_GESTURE_RATIO_STATIC:
+            
+            hand_height_diff = abs(left_wrist["y"] - right_wrist["y"])
+            
+            if hand_height_diff >= 0.25:
+                return False
+            
+            # 손이 너무 아래에 있으면 wide gesture 제외
+            if (
+                left_wrist["y"] > left_shoulder["y"] + 0.15 or
+                right_wrist["y"] > right_shoulder["y"] + 0.15
+            ):
+                return False
+            
             return True
 
-        if movement_score < MOTION_THRESHOLD:
+        if abs(left_wrist["y"] - left_shoulder["y"]) > 0.5 or abs(right_wrist["y"] - right_shoulder["y"]) > 0.5:
+            return False
+
+        if movement_score < 0.01:
             return False
 
         if self.prev_landmarks:
@@ -128,7 +138,7 @@ class GestureDetector:
             if prev_left and prev_right:
                 prev_distance = abs(prev_left["x"] - prev_right["x"])
                 expanding = hand_distance > prev_distance + 0.005
-                moving_out = left_wrist["x"] < prev_left["x"] or right_wrist["x"] > prev_right["x"]
+                moving_out = left_wrist["x"] < prev_left["x"] and right_wrist["x"] > prev_right["x"]
                 if expanding and moving_out:
                     return True
 
@@ -183,10 +193,40 @@ class GestureDetector:
         left_score += int(left_velocity > WRIST_VELOCITY_THRESHOLD)
         right_score += int(right_velocity > WRIST_VELOCITY_THRESHOLD)
 
+        # 양팔 펼침 자세면 pointing 제외
+        both_extended = (
+            angle_left > POINTING_ANGLE_THRESHOLD and
+            angle_right > POINTING_ANGLE_THRESHOLD
+        )
+
+        hand_height_diff = abs(left_wrist["y"] - right_wrist["y"])
+
+        hand_distance = abs(left_wrist["x"] - right_wrist["x"])
+        shoulder_distance = abs(right_shoulder["x"] - left_shoulder["x"])
+
+        normalized = 0
+        if shoulder_distance > 0:
+            normalized = hand_distance / shoulder_distance
+
+        if (
+            both_extended and
+            normalized >= WIDE_GESTURE_RATIO and
+            hand_height_diff < 0.25
+        ):
+            return False
+
         if left_score >= 4 and right_score >= 4:
             return False
 
-        return left_score >= 4 or right_score >= 4
+        # 한쪽 팔만 강하게 활성화되어야 pointing 인정
+        left_active = left_score >= 4
+        right_active = right_score >= 4
+
+        # 양팔 동시에 활성화되면 wide gesture 가능성 높음
+        if left_active and right_active:
+            return False
+
+        return left_active or right_active
 
     def detect_gesture(self, landmarks: dict, movement_score: float) -> list[str]:
         """통합 gesture detection with temporal consistency"""
@@ -318,7 +358,8 @@ while cap.isOpened():
                     (curr["y"] - prev["y"]) ** 2
                 )
 
-                movement_score += dist
+                if dist > 0.003:
+                    movement_score += dist
 
         frame_info["movement_score"] = movement_score
 
@@ -344,6 +385,22 @@ while cap.isOpened():
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
             (0, 255, 0),
+            2
+        )
+        
+        # gesture 표시
+        gesture_text = "None"
+
+        if gesture_tags:
+            gesture_text = ", ".join(gesture_tags)
+
+        cv2.putText(
+            frame,
+            f"Gesture: {gesture_text}",
+            (20, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 255),
             2
         )
 
