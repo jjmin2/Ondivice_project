@@ -317,24 +317,6 @@ def save_highlights(path: Path, highlights: List[HighlightSegment]) -> None:
 def main(
     audio_file: Optional[Path] = None,
     motion_events_file: Optional[Path] = None,
-    output_file: Optional[Path] = None,
-    model_name: str = "base",
-) -> List[HighlightSegment]:
-    """
-    End-to-end multimodal highlight extraction
-    
-    Args:
-        audio_file: 오디오 파일 경로 (기본값: BASE_DIR / videos 내 첫 번째 wav/mp3)
-        motion_events_file: motion events JSON 경로 (기본값: MOTION_EVENTS_FILE)
-        output_file: 출력 JSON 경로 (기본값: HIGHLIGHT_OUTPUT_FILE)
-        model_name: Whisper 모델 이름 (tiny/base/small/medium)
-    
-    Returns:
-        List of HighlightSegment
-    """
-def main(
-    audio_file: Optional[Path] = None,
-    motion_events_file: Optional[Path] = None,
     transcription_file: Optional[Path] = None,
     output_file: Optional[Path] = None,
     model_name: str = "base",
