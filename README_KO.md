@@ -21,7 +21,7 @@
 
 ### 2. **음성 분석 (Speech Analysis)**
 - OpenAI Whisper를 이용한 음성 전사
-- 타임스탐프 포함 세그먼트 자동 생성
+- 타임스탬프 포함 세그먼트 자동 생성
 - 한국어, 영어 등 다국어 지원
 
 ### 3. **멀티모달 정렬 (Multimodal Alignment)**
@@ -30,10 +30,12 @@
 
 ### 4. **Highlight 추출 (Highlight Extraction)**
 ```
-Highlight Score = 
-    Speech Weight(0.6) × Speech Score 
-    + Motion Weight(0.4) × Motion Score 
+Highlight Score =
+    Speech Weight(0.6) × Speech Score
+    + Motion Weight(0.4) × Motion Score
     + Overlap Bonus (최대 0.15)
+
+※ 최종 점수 0.4 이상인 구간만 편집 포인트로 선정
 ```
 
 ### 5. **편집포인트 출력 (Edit Point Output)**
@@ -50,6 +52,10 @@ Highlight Score =
     "note": "speech(0.75) | motion(0.42) | overlap(1.50s)"
 }
 ```
+
+### 6. **Highlight Reel 생성 (Video Export)**
+- FFmpeg를 이용해 편집 포인트 클립을 자동 추출·연결
+- `{영상명}_highlight_reel.mp4` 파일 자동 생성
 
 ---
 
@@ -73,7 +79,7 @@ scripts/
 ```
 Video/Webcam
     ↓
-pose_analyzer.py → pose_data.json
+pose_analyzer.py → pose_data_{timestamp}.json
     ↓
 extract_motion_events.py → motion_events.json
     ↓ (병렬)              ↓
@@ -85,8 +91,40 @@ extract_motion_events.py → motion_events.json
             ↓
     highlight_segments.json (최종 편집포인트)
             ↓
-    Video Editor (자동 챕터 생성, 클립 추출 등)
+    FFmpeg (Step 4)
+            ↓
+    {영상명}_highlight_reel.mp4 + pipeline_log_{timestamp}.json
 ```
+
+---
+
+## 🔍 편집 포인트 선정 기준
+
+### 음성 점수 (Speech Score)
+| 조건 | 점수 |
+|------|------|
+| 강조 키워드 포함 | +0.6 |
+| 텍스트 50자 이상 | +0.4 |
+| 텍스트 20자 이상 | +0.2 |
+
+**강조 키워드**: 중요, 핵심, 정리, 포인트, 주의, 기억, 결론, 요약, important, key, summary, point, note, remember, conclusion
+
+### 모션 점수 (Motion Score)
+| 조건 | 점수 |
+|------|------|
+| peak_score > 0 | peak_score 직접 사용 (최대 1.0) |
+| average_score > 0 | average_score × 1.2 (부스트) |
+| duration 3초 이상 | 0.8 |
+| duration 2초 이상 | 0.6 |
+| duration 1초 이상 | 0.4 |
+| duration 1초 미만 | 0.2 |
+
+### 이벤트 타입 분류
+| 타입 | 조건 |
+|------|------|
+| `emphasized_speech_with_gesture` | speech_score ≥ 0.6 AND motion_score ≥ 0.5 |
+| `emphatic_gesture` | motion_score ≥ 0.6 |
+| `emphasized_speech` | 그 외 (기본) |
 
 ---
 
@@ -100,16 +138,28 @@ extract_motion_events.py → motion_events.json
 ### 의존성 설치
 
 ```bash
-# 기본 라이브러리
-pip install opencv-python mediapipe numpy matplotlib
+pip install -r requirements.txt
+```
 
-# 음성 처리
-pip install openai-whisper
+`requirements.txt`:
+```
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+openai-whisper>=20231117
+```
 
-# 비디오 처리 (FFmpeg)
-# Windows: choco install ffmpeg
-# macOS: brew install ffmpeg  
-# Linux: apt install ffmpeg
+비디오 처리에 FFmpeg도 필요합니다:
+```bash
+# Windows
+choco install ffmpeg
+
+# macOS
+brew install ffmpeg
+
+# Linux
+apt install ffmpeg
 ```
 
 ### 프로젝트 구조
@@ -126,10 +176,12 @@ ondivice/
 │   └── validate.py
 ├── videos/              # 입력 비디오 파일
 ├── outputs/            # 생성된 데이터
-│   ├── pose_data.json
+│   ├── pose_data_{timestamp}.json
 │   ├── motion_events.json
 │   ├── transcription_segments.json
-│   └── highlight_segments.json
+│   ├── highlight_segments.json
+│   ├── {영상명}_highlight_reel.mp4
+│   └── pipeline_log_{timestamp}.json
 └── venv/               # 가상 환경
 ```
 
@@ -152,28 +204,32 @@ python scripts/pipeline.py \
 ```
 
 **옵션 설명:**
-- `--video`: 입력 비디오 파일
-- `--audio`: 오디오 파일 (선택사항)
-- `--model`: Whisper 모델 크기 (tiny/base/small/medium, 기본값: base)
-- `--language`: 음성 언어 (ko/en, 기본값: ko)
-- `--skip-step1`: Motion extraction 스킵
+| 옵션 | 단축키 | 설명 | 기본값 |
+|------|--------|------|--------|
+| `--video` | `-v` | 입력 비디오 파일 | - |
+| `--audio` | `-a` | 오디오 파일 (선택사항, 비디오 우선) | - |
+| `--model` | `-m` | Whisper 모델 크기 (tiny/base/small/medium) | base |
+| `--language` | `-l` | 음성 언어 | ko |
+| `--skip-step1` | - | Motion extraction 스킵 (기존 motion_events.json 사용) | false |
+
+파이프라인 완료 후 `outputs/pipeline_log_{timestamp}.json`에 실행 로그가 저장됩니다.
 
 ### 2️⃣ 단계별 실행
 
-#### Step 1: Pose 데이터 추출
+#### Step 0: Pose 데이터 추출
 ```bash
 python scripts/pose_analyzer.py
-# 웹캠에서 실시간 pose 추출
-# 'q' 키로 종료하면 pose_data.json 생성
+# 비디오/웹캠에서 실시간 pose 추출
+# 'q' 키로 종료하면 pose_data_{timestamp}.json 생성
 ```
 
-#### Step 2: Motion Event 추출
+#### Step 1: Motion Event 추출
 ```bash
 python scripts/extract_motion_events.py
-# pose_data.json → motion_events.json
+# outputs/pose_data_*.json (최신 파일 자동 선택) → motion_events.json
 ```
 
-#### Step 3: 음성 전사
+#### Step 2: 음성 전사
 ```bash
 python scripts/transcribe_audio.py \
     --input videos/lecture.mp4 \
@@ -182,12 +238,15 @@ python scripts/transcribe_audio.py \
 # transcription_segments.json 생성
 ```
 
-#### Step 4: Highlight 추출
+#### Step 3: Highlight 추출
 ```bash
 python scripts/merge_whisper_pose.py
 # motion_events.json + transcription_segments.json
 # → highlight_segments.json (최종 편집포인트)
 ```
+
+#### Step 4: Highlight Video 생성
+`pipeline.py` 실행 시 자동으로 처리됩니다. 개별 실행은 `pipeline.py`를 통해서만 가능합니다.
 
 ### 3️⃣ 시스템 검증
 
@@ -206,9 +265,9 @@ python scripts/validate.py --create-sample
 ### extract_motion_events.py
 
 ```python
-THRESHOLD = 0.1              # 움직임 감지 임계값 (낮을수록 민감)
+THRESHOLD = 0.05             # 움직임 감지 임계값 (낮을수록 민감)
 FPS = 30                     # 프레임률
-GRACE_FRAMES = int(0.7*FPS) # 관용 프레임 수 (짧은 움직임 무시)
+GRACE_FRAMES = int(0.7*FPS) # 관용 프레임 수 (짧은 정지 무시)
 MIN_DURATION = 1.0           # 최소 이벤트 지속시간 (초)
 MIN_PEAK_SCORE = 0.15        # 최소 피크 점수
 ```
@@ -221,8 +280,8 @@ MOTION_WEIGHT = 0.4          # 모션 가중치
 MERGE_GAP_SEC = 0.5          # 세그먼트 병합 허용 간격 (초)
 
 KEYWORDS = [                 # 강조 감지 키워드
-    "중요", "핵심", "정리", "포인트", 
-    "important", "key", "summary", ...
+    "중요", "핵심", "정리", "포인트", "주의", "기억", "결론", "요약",
+    "important", "key", "summary", "point", "note", "remember", "conclusion"
 ]
 ```
 
@@ -267,7 +326,7 @@ KEYWORDS = [                 # 강조 감지 키워드
         "start": 5.43,
         "end": 15.9,
         "duration": 10.47,
-        "text": "이 변화율이라는 게 뭐라고 뭐냐면 수상생수가 우리 조금 전에 12시에는 12시 우리 아까 한 3000명   정도 됐었거든요. 이 변화율이라는 게 뭐라고 뭐냐면 수상생수가 우리 조금 전에 12시에는 12시 우리 아까 한  3000명 정도 됐었거든요. 3000명.",
+        "text": "이 변화율이라는 게 뭐라고 뭐냐면...",
         "speech_score": 0.4,
         "motion_score": 1.0,
         "highlight_score": 0.689,
@@ -276,18 +335,19 @@ KEYWORDS = [                 # 강조 감지 키워드
             "hand_raise",
             "pointing"
         ],
-        "note": "overlap(4.70s) | motion(1.00) | overlap(2.63s) | motion(1.00)"
-  }
+        "note": "overlap(4.70s) | motion(1.00)"
+    }
 ]
 ```
+
 ---
+
 ## 🔧 Jetson Orin Nano 최적화
 
 ### 메모리 고려사항
 ```python
 # Jetson Orin Nano 사양
-# - RAM: 8GB
-# - GPU VRAM: 8GB (Ampere)
+# - RAM: 8GB (Ampere GPU 공유)
 
 # 최적 설정
 WHISPER_MODEL = "base"       # tiny/base 추천 (8GB 충분)
@@ -298,7 +358,7 @@ POSE_DETECTION_CONF = 0.3    # 낮을수록 빠름
 ### 배포 최적화
 ```bash
 # 1. 경량 모델 사용
-python scripts/pipeline.py --model tiny
+python scripts/pipeline.py --video videos/lecture.mp4 --model tiny
 
 # 2. 배치 처리 (여러 영상)
 for video in videos/*.mp4; do
@@ -310,6 +370,7 @@ python scripts/validate.py
 ```
 
 ---
+
 ## 🐛 문제 해결
 
 ### 오디오 파일을 찾을 수 없음
@@ -328,17 +389,22 @@ python scripts/pipeline.py --video videos/lecture.mp4
 python -c "import whisper; whisper.load_model('base')"
 
 # 캐시 위치 확인
-~/.cache/whisper/  (Linux/Mac)
-%USERPROFILE%\.cache\whisper\  (Windows)
+~/.cache/whisper/               (Linux/Mac)
+%USERPROFILE%\.cache\whisper\   (Windows)
 ```
 
 ### 메모리 부족
-```python
-# 모델 크기 축소
---model tiny  # base 대신 tiny 사용
+```bash
+# 모델 크기 축소: base 대신 tiny 사용
+python scripts/pipeline.py --video videos/lecture.mp4 --model tiny
+```
 
-# 배치 크기 감소
-# transcribe_audio.py에서 청크 크기 조정
+### pose_data.json이 생성되지 않음
+```bash
+# 최신 pose 파일 자동 탐색 (outputs/pose_data_*.json)
+# Step 0 재실행 후 Step 1 진행
+python scripts/pose_analyzer.py
+python scripts/extract_motion_events.py
 ```
 
 ---
@@ -363,12 +429,13 @@ This project is provided for research and development purposes.
 
 - [ ] Python 3.10+ 설치
 - [ ] 모든 의존성 설치 (`pip install -r requirements.txt`)
-- [ ] FFmpeg 설치 확인
+- [ ] FFmpeg 설치 확인 (`ffmpeg -version`)
 - [ ] `videos/` 디렉토리에 테스트 영상 배치
 - [ ] `python scripts/validate.py` 실행 - **READY** 상태 확인
 - [ ] `python scripts/pipeline.py --video videos/test.mp4` 실행
 - [ ] `outputs/highlight_segments.json` 생성 확인
+- [ ] `outputs/{영상명}_highlight_reel.mp4` 생성 확인
 
 ---
 
-**최종 업데이트**: 2025-05-16
+**최종 업데이트**: 2026-05-16
